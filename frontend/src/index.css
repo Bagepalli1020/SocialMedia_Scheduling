@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #14231c;
+  --muted: #5a6b62;
+  --surface: #f3f7f4;
+  --panel: #ffffff;
+  --line: #d5e0d9;
+  --accent: #0f7a55;
+  --accent-soft: #d8f0e6;
+  --warn: #b45309;
+  --danger: #b91c1c;
+  --ok: #047857;
+  --shadow: 0 10px 30px rgba(20, 35, 28, 0.08);
+  font-family: "DM Sans", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 0%, #dff3ea 0%, transparent 40%),
+    radial-gradient(circle at 90% 10%, #e8eef5 0%, transparent 35%),
+    var(--surface);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+.brand-font {
+  font-family: "Fraunces", Georgia, serif;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.65rem;
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+  transition: transform 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #0c6848;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.badge-scheduled {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.badge-publishing {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-published {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge-failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-up {
+  animation: fade-up 420ms ease both;
+}
