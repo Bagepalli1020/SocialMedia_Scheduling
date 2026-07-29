@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
@@ -26,10 +26,58 @@ from app.workers.celery_app import celery_app
 settings = get_settings()
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def reclaim_stuck_publishing_posts(db: Session, *, older_than_seconds: int = 120) -> int:
+    """
+    Recover posts stuck in `publishing` (e.g. worker crashed mid-publish).
+    Sets them back to `scheduled` so they can be claimed again.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+    stuck_ids: set[int] = set()
+    publishing_posts = db.query(Post).filter(Post.status == PostStatus.publishing).all()
+    for post in publishing_posts:
+        latest = (
+            db.query(PostLog)
+            .filter(PostLog.post_id == post.id, PostLog.status == "publishing")
+            .order_by(PostLog.executed_at.desc())
+            .first()
+        )
+        executed_at = _as_utc(latest.executed_at if latest else post.created_at)
+        if executed_at <= cutoff:
+            stuck_ids.add(post.id)
+
+    reclaimed = 0
+    now = datetime.now(timezone.utc)
+    for post_id in stuck_ids:
+        post = db.query(Post).filter(Post.id == post_id).first()
+        if not post or post.status != PostStatus.publishing:
+            continue
+        post.status = PostStatus.scheduled
+        if _as_utc(post.scheduled_time) > now:
+            post.scheduled_time = now - timedelta(seconds=1)
+        db.add(
+            PostLog(
+                post_id=post.id,
+                status="reclaimed",
+                response="Reclaimed stuck publishing post for retry",
+            )
+        )
+        reclaimed += 1
+    if reclaimed:
+        db.commit()
+    return reclaimed
+
+
 def run_publish_due_posts(db: Session, *, enqueue: bool = True) -> dict:
     """
     Find due posts. If enqueue=True, push Celery jobs; otherwise publish inline (tests).
     """
+    reclaimed = reclaim_stuck_publishing_posts(db)
     now = datetime.now(timezone.utc)
     due_posts = (
         db.query(Post)
@@ -45,7 +93,12 @@ def run_publish_due_posts(db: Session, *, enqueue: bool = True) -> dict:
         else:
             run_publish_post(db, post.id)
         processed += 1
-    return {"due_found": len(due_posts), "enqueued": processed, "checked_at": now.isoformat()}
+    return {
+        "due_found": len(due_posts),
+        "enqueued": processed,
+        "reclaimed": reclaimed,
+        "checked_at": now.isoformat(),
+    }
 
 
 def run_publish_post(db: Session, post_id: int) -> dict:
@@ -55,12 +108,8 @@ def run_publish_post(db: Session, post_id: int) -> dict:
     Lock strategy: only transition status from `scheduled` -> `publishing`.
     If another worker already claimed it, skip.
     """
-    query = (
-        db.query(Post)
-        .options(joinedload(Post.social_account))
-        .filter(Post.id == post_id)
-    )
-    # SELECT FOR UPDATE when supported (PostgreSQL). SQLite tests skip it.
+    # Lock the post row alone first (FOR UPDATE + LEFT JOIN is invalid on PostgreSQL).
+    query = db.query(Post).filter(Post.id == post_id)
     try:
         if db.bind and db.bind.dialect.name == "postgresql":
             query = query.with_for_update()
@@ -68,6 +117,9 @@ def run_publish_post(db: Session, post_id: int) -> dict:
         pass
 
     post = query.first()
+    if post:
+        # Load related account after the lock, without joining in the FOR UPDATE query.
+        _ = post.social_account
     if not post:
         return {"post_id": post_id, "result": "not_found"}
 

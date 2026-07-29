@@ -64,11 +64,15 @@ pip install -r requirements.txt
 copy .env.example .env   # Windows
 # cp .env.example .env   # macOS / Linux
 
+# Create DB if missing (safe to re-run), then migrate
+python scripts/create_database.py
 alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
 API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+> Docker Compose DB password is `postgres`. If you use your own Postgres password, update `DATABASE_URL` in `backend/.env`.
 
 ### 3) Background worker + scheduler (separate terminals)
 
@@ -104,6 +108,7 @@ User schedules post (status=scheduled, future scheduled_time)
         ▼
 Celery Beat (every 30s by default)
   → task: publish_due_posts
+  → reclaim posts stuck in `publishing` (worker crash recovery)
   → finds posts where scheduled_time <= now AND status=scheduled
         │
         ▼
@@ -115,6 +120,9 @@ Celery Worker
   → on success: status=published + Analytics (views/likes/shares)
   → on failure: retry (optional) or status=failed
 ```
+
+> Assignment statuses are `scheduled | published | failed`.  
+> This project also uses temporary `publishing` as a lock so two workers cannot publish the same post.
 
 ### Critical backend rules implemented
 

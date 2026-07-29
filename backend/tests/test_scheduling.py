@@ -94,6 +94,18 @@ def test_background_publish_updates_status(client, auth_headers, social_account_
         db_session.refresh(post)
         assert post.status == PostStatus.published
 
+        from app.models.analytics import Analytics
+        from app.models.post import PostLog
+
+        logs = db_session.query(PostLog).filter(PostLog.post_id == post_id).all()
+        assert any(log.status == "publishing" for log in logs)
+        assert any(log.status == "published" for log in logs)
+        analytics = db_session.query(Analytics).filter(Analytics.post_id == post_id).first()
+        assert analytics is not None
+        assert analytics.views >= 0
+        assert analytics.likes >= 0
+        assert analytics.shares >= 0
+
 
 def test_prevent_duplicate_publishing(client, auth_headers, social_account_id, db_session):
     from app.services import publisher
@@ -214,3 +226,38 @@ def test_publish_due_posts_batch(client, auth_headers, social_account_id, db_ses
     for post_id in ids:
         post = db_session.query(Post).filter(Post.id == post_id).first()
         assert post.status == PostStatus.published
+
+
+def test_reclaim_stuck_publishing_posts(client, auth_headers, social_account_id, db_session):
+    from app.models.post import PostLog
+    from app.workers.tasks import reclaim_stuck_publishing_posts
+
+    create = client.post(
+        "/api/posts",
+        headers=auth_headers,
+        json={
+            "content": "Stuck post",
+            "scheduled_time": future_time(20),
+            "social_account_id": social_account_id,
+        },
+    )
+    post_id = create.json()["id"]
+    post = db_session.query(Post).filter(Post.id == post_id).first()
+    post.status = PostStatus.publishing
+    post.scheduled_time = past_time(5)
+    db_session.add(
+        PostLog(
+            post_id=post_id,
+            status="publishing",
+            response="Claimed then worker died",
+            executed_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        )
+    )
+    db_session.commit()
+
+    reclaimed = reclaim_stuck_publishing_posts(db_session, older_than_seconds=60)
+    assert reclaimed == 1
+    db_session.refresh(post)
+    assert post.status == PostStatus.scheduled
+    logs = db_session.query(PostLog).filter(PostLog.post_id == post_id).all()
+    assert any(log.status == "reclaimed" for log in logs)
